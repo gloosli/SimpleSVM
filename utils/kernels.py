@@ -34,3 +34,15 @@ def tanhKernel(X,params=[-1,1],Xt = None):
 
 def labelledTanhKernel(X,y):
     return tanhKernel(X)*np.outer(y,y)
+
+
+# poly kernel
+def polyKernel(X,params=[2,1],Xt = None):
+    if (Xt is None):
+        Q =  (params[1]*np.matmul(X,X.T)+params[2])**params[0]
+    else:
+        Q =  (params[1]*np.matmul(X,Xt.T)+params[2])**params[0]
+    return Q
+
+def labelledPolyKernel(X,y):
+    return polyKernel(X)*np.outer(y,y)

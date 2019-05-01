@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import scipy.linalg as la
+import ipdb
 
 def lunopiv(A,ptol):
 
@@ -42,12 +43,50 @@ def postKSVM2(alpha,y,L,D):
 def predict(alpha,b,y,Kt):
     return np.dot(y*alpha.T,Kt)+b
 
+def predictSVR(alpha,b,Kt):
+    return np.dot(alpha.T,Kt)+b
+
 def evaluate(yt, ypred= None, alpha=None,b=None,y=None,Kt=None ):
     if (ypred is None):
         ypred = predict(alpha,b,y,Kt)
     return np.count_nonzero(np.where(np.sign(ypred)==np.sign(yt)))/np.size(yt)
 
-def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
+
+def evaluateSVR(yt, ypred= None, alpha=None,b=None,Kt=None ):
+    if (ypred is None):
+        ypred = predictSVR(alpha,b,Kt)
+    return ((ypred-yt)**2).mean(axis=None)
+
+def solveSVR(K,y,C,epsilon,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
+    eqcons = np.concatenate((np.ones(y.size),-np.ones(y.size)))
+    if (ce is None):
+        ce = np.concatenate((y-epsilon,-y-epsilon),axis=0)
+    G = np.tile(K,(2,2))
+    beta,b = solve(G,eqcons,C,x0 = x0, verbose = verbose,lb=lb,ub=ub,ce=ce,type='regression')
+    alpha = beta[0:y.size]-beta[y.size:]
+    return alpha,b
+
+def initialize(I,smin,ub,lb,G,y,ce,be):
+    n = I.size
+    xnew = -np.ones((smin))
+    w = [0,1]
+    ness=0
+    while ((np.where(xnew<lb[w])[0].size>0 or (np.where(xnew>ub[w])[0].size>0)) and ness<100):
+        w = np.random.choice(n, smin, replace=False)
+        Z = np.linalg.solve(G[np.ix_(w,w)],y[w].T)
+        W = np.linalg.solve(G[np.ix_(w,w)],ce[w])
+        b = (be+np.dot(W.T,y[w]))/np.dot(y[w],Z)
+        xnew = (-b*Z+W.T).T
+        ness += 1
+    if ness==100:
+        point1 = 0
+        I[0]+=1.
+    else:
+        I[w]+=1
+    print(ness)
+    return I
+
+def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None,type='binary'):
     n = np.shape(y)[0]
     prec = 0.0001
     epochs = 10
@@ -68,13 +107,13 @@ def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
         ce = np.ones((n,1))
     else:
         ce = ce.reshape((-1,1))
+
     margin=ce.copy()
 
     probSelection = np.ones(n)/n
     iter_max = n*epochs
-    MAX_SELECT = 200
+    MAX_SELECT = np.max((np.min((200,n-10)),2))
 
-    sMin = 2
     I = -np.ones(n)
     x = lb.copy()
     if x0 is not None:
@@ -90,12 +129,9 @@ def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
                 be += ub[i]*y[:,i]
                 x[i] = ub[i]
     else:
-        point1 = np.argmax(y==-1)
-        x[point1] = ub[point1]/2
-        I[point1]+=1.
-        point2 = np.argmax(y==1)
-        x[point2] = ub[point2]/2
-        I[point2]+=1.
+        sMin = 2
+        I = initialize(I,sMin,ub,lb,G,y,ce,be)
+
     optimal = False
     iter = 0
     if (verbose>=1):
@@ -151,11 +187,11 @@ def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
                 optimal = True
             else:
                 sizeSelection = min(MAX_SELECT,np.size(np.where(probSelection>0)[0]))
-                selection =  np.random.choice(n, sizeSelection, replace=False, p=probSelection)
-                nu = ((np.dot(G[np.ix_(selection,w)],x[w]).T+b*y.T[selection]-margin[selection])*-I[selection])[0]
-                cand = np.argmin(nu)
+                selection =  np.sort(np.random.choice(n, sizeSelection, replace=False, p=probSelection))
 
-                if nu[cand]<0:
+                nu = ((np.dot(G[np.ix_(selection,w)],x[w]).T+b*y.T[selection]-margin[selection].T)*-I[selection])[0]
+                cand = np.argmin(nu)
+                if (nu[cand]<0):
                     if I[selection[cand]]==-1:
                         I[selection[cand]]+=1.
                         ce += np.reshape(lb[selection[cand]]*G[:,selection[cand]],(n,1))
@@ -173,28 +209,29 @@ def solve(K,y,C,x0 = None, verbose = 1,lb=None,ub=None,ce=None):
 
                 else:
                     selection =  np.where(I!=0)[0]
-                    nu = ((np.dot(G[np.ix_(selection,w)],x[w]).T+b*y.T[selection]-margin[selection])*-I[selection])[0]
-
-                    cand = np.argmin(nu*np.sign(margin[selection]))
-                    if nu[cand]>=0:
-                        optimal = True
-                    else:
-                        if I[selection[cand]]==-1:
-                            I[selection[cand]]+=1.
-                            ce += np.reshape(lb[selection[cand]]*G[:,selection[cand]],(n,1))
-                            be -= lb[selection[cand]]*y[selection[cand]]
-                            x[selection[cand]] = lb[selection[cand]]
+                    if (selection.size>0):
+                        nu = ((np.dot(G[np.ix_(selection,w)],x[w]).T+b*y.T[selection]-margin[selection].T)*-I[selection])[0]
+                        cand = np.argmin(nu)
+                        if (nu[cand]>=0):
+                            optimal = True
                         else:
-                            I[selection[cand]]-=1.
-                            ce += np.reshape(ub[selection[cand]]*G[:,selection[cand]],(n,1))
-                            be -= ub[selection[cand]]*y[selection[cand]]
-                            x[selection[cand]] = ub[selection[cand]]
+                            if I[selection[cand]]==-1:
+                                I[selection[cand]]+=1.
+                                ce += np.reshape(lb[selection[cand]]*G[:,selection[cand]],(n,1))
+                                be -= lb[selection[cand]]*y[selection[cand]]
+                                x[selection[cand]] = lb[selection[cand]]
+                            else:
+                                I[selection[cand]]-=1.
+                                ce += np.reshape(ub[selection[cand]]*G[:,selection[cand]],(n,1))
+                                be -= ub[selection[cand]]*y[selection[cand]]
+                                x[selection[cand]] = ub[selection[cand]]
 
-                        probSelection[selection] = - nu + np.max(nu)
-                        probSelection[selection[cand]] = 0
+                            probSelection[selection] = - nu + np.max(nu)
+                            probSelection[selection[cand]] = 0
+                    else:
+                        optimal = True
+
                 probSelection /= np.sum(probSelection)
-
-
 
     if iter==iter_max:
         print("not converged")
