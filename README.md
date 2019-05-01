@@ -5,3 +5,5 @@ Currently works with pre-computed kernels, some are provided (linear, rbf, poly 
 
 * demo1 : examples for binary classification
 * demo2 : examples for regression
+
+![alt text](https://github.com/gloosli/SimpleSVM/blob/master/figs/reg.png)
