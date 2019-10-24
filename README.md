@@ -1,4 +1,4 @@
-# SimpleSVM
+# SimpleSVM and KSVM 
 SimpleSVM based algorithms, in Python
 
 Currently works with pre-computed kernels, some are provided (linear, rbf, poly and tanh) for testing purposes.
